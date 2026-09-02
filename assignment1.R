@@ -8,7 +8,7 @@ library(quanteda.textplots)
 # 2. my dataset is in RTF
 install.packages("readtext")
 library(readtext)
-ML500 <- readtext("/Users/koyohoma/Documents/UTD/2026 Fall/EPPS6355/Files500/*.rtf")
+ML500 <- readtext("data/*.rtf")
 
 # 3.Create a quanteda Corpus object
 my_corpus <- corpus(
