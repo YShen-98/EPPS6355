@@ -1,0 +1,240 @@
+---
+title: 'Assignment 2: Topic Model'
+author: "Yue Shen"
+date: "2026-09-23"
+output:
+  html_document:
+    code_folding: hide
+---
+
+# Research Question
+
+My original research question asks whether journalistic, institutional, and corporate sources differ in how they frame the benefits and risks of artificial intelligence (AI) in special education and in the types of evidence used to support these claims.
+
+For this preliminary topic-modeling analysis, I first use topic modeling as an exploratory tool to examine the composition of the retrieved corpus and assess what types of discourse were actually captured by the original search strategy.
+
+The original source-type, framing, and evidence comparisons remain the broader goal of the project, but their suitability depends on what the exploratory analysis reveals about the corpus.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+knitr::opts_knit$set(
+  root.dir = "/Users/koyohoma/Documents/UTD/2026 Fall/EPPS6355/EPPS6355"
+)
+```
+
+```{r packages}
+library(quanteda)
+library(stm)
+library(striprtf)
+```
+
+# Text Data
+
+The text data were collected from Nexis Uni through the UTD Library. The search strategy included two concept blocks: AI-related terms and special-education-related terms. To improve topical relevance, the two concept blocks were connected using the Nexis Uni proximity operator `W/P`, requiring the terms to occur within the same paragraph.
+
+The search included AI-related terms such as "artificial intelligence," "machine learning," "generative AI," "large language model," ChatGPT, Claude AI, Google Gemini, and Microsoft Copilot, together with special-education-related terms such as "special education," "IEP," "special needs education," and "individualized education program."
+
+For Assignment 2, I downloaded a subset of the search results in two batches. The downloaded data initially contained 974 RTF files.
+
+# Data Import and Corpus Cleaning
+
+The downloaded RTF files were imported into R and converted into a document-level text dataset. Two downloaded files were Nexis-generated document lists rather than news documents and were removed, leaving 972 documents for preliminary exploration.
+
+During validation, I found that some Nexis files were composite news digests rather than single coherent articles. In particular, documents labeled *News Bites* and *Global Round Up* frequently combined multiple unrelated news items. Because the intended unit of analysis is one coherent article, these composite digest documents were excluded before the final topic model was estimated.
+
+```{r import-data}
+# Read RTF files from both downloaded batches
+rtf_files <- c(
+  list.files(
+    "raw data/Files1-500",
+    pattern = "\\.rtf$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  ),
+  list.files(
+    "raw data/Files 501-1000",
+    pattern = "\\.rtf$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+)
+
+length(rtf_files)
+
+ML1000 <- data.frame(
+  doc_id = rtf_files,
+  text = sapply(
+    rtf_files,
+    function(f) paste(read_rtf(f), collapse = "\n")
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Remove Nexis document-list files
+ML1000 <- ML1000[
+  !grepl("doclist", ML1000$doc_id, ignore.case = TRUE),
+]
+
+nrow(ML1000)
+
+# Identify composite news-digest documents
+ML1000$is_news_bites <- grepl(
+  "News Bites",
+  substr(ML1000$text, 1, 300),
+  ignore.case = TRUE
+)
+
+ML1000$is_global_roundup <- grepl(
+  "Global Round Up",
+  substr(ML1000$text, 1, 300),
+  ignore.case = TRUE
+)
+
+# Exclude composite digests
+ML_clean <- ML1000[
+  !(ML1000$is_news_bites | ML1000$is_global_roundup),
+]
+
+nrow(ML_clean)
+```
+
+The final working corpus contained **670 documents**.
+
+# Preprocessing
+
+The 670 documents were converted into a `quanteda` corpus and tokenized. Text was converted to lowercase, while punctuation, symbols, and numbers were removed. Standard English stopwords were removed, although several negation and modal terms such as *not*, *can*, *could*, *may*, *might*, *should*, and *must* were retained because they may carry meaningful information about how AI is discussed.
+
+Several multiword expressions, including *artificial intelligence* and *special education*, were compounded so that they could be treated as single features. A small set of common news-reporting terms was also removed because they contributed little substantive meaning to the topic structure.
+
+```{r preprocessing}
+my_corpus <- corpus(
+  ML_clean$text,
+  docnames = ML_clean$doc_id
+)
+
+ndoc(my_corpus)
+
+my_tokens <- tokens(
+  my_corpus,
+  remove_punct = TRUE,
+  remove_symbols = TRUE,
+  remove_numbers = TRUE
+) |>
+  tokens_tolower()
+
+my_tokens <- tokens_compound(
+  my_tokens,
+  pattern = phrase(c(
+    "artificial intelligence",
+    "special education",
+    "individualized education program",
+    "individualized education plan"
+  ))
+)
+
+my_stopwords <- setdiff(
+  stopwords("en"),
+  c(
+    "not", "no", "nor",
+    "can", "could", "may", "might",
+    "should", "must"
+  )
+)
+
+my_tokens <- tokens_remove(
+  my_tokens,
+  pattern = my_stopwords
+)
+
+extra_stopwords <- c(
+  "said", "also", "new", "news",
+  "year", "end", "words"
+)
+
+my_tokens <- tokens_remove(
+  my_tokens,
+  pattern = extra_stopwords
+)
+
+my_dfm <- dfm(my_tokens)
+
+ndoc(my_dfm)
+nfeat(my_dfm)
+topfeatures(my_dfm, 30)
+```
+
+# Topic Model
+
+Structural Topic Modeling (STM) was used as an exploratory unsupervised method to identify recurring patterns of word co-occurrence in the corpus. Features appearing in fewer than three documents were removed to reduce sparse, low-frequency terms. A five-topic model (`K = 5`) was used as a parsimonious starting point for this preliminary analysis rather than as a claim that five is the optimal number of topics. Spectral initialization and a fixed random seed were used for reproducibility.
+
+Topic interpretation was based on both the highest-probability and FREX words, followed by manual validation of representative documents identified with `findThoughts()`.
+
+```{r stm-model}
+my_dfm_trimmed <- dfm_trim(
+  my_dfm,
+  min_docfreq = 3
+)
+
+nfeat(my_dfm_trimmed)
+
+stm_input_trimmed <- convert(
+  my_dfm_trimmed,
+  to = "stm"
+)
+
+set.seed(6261705)
+
+my_stm_trimmed <- stm(
+  stm_input_trimmed$documents,
+  stm_input_trimmed$vocab,
+  K = 5,
+  init.type = "Spectral"
+)
+
+labelTopics(
+  my_stm_trimmed,
+  n = 10
+)
+```
+
+# Representative-Document Validation
+
+Representative documents were used to check whether the topic-word summaries corresponded to substantively coherent documents. The full article texts are not printed here because some source documents are very long.
+
+```{r validate-topics}
+representative_docs <- findThoughts(
+  my_stm_trimmed,
+  texts = ML_clean$text,
+  topics = c(1, 2, 3, 4, 5),
+  n = 2
+)
+```
+
+# Results and Limitations
+
+The five-topic STM captured both substantively relevant and irrelevant content. Manual validation suggested the following preliminary interpretations:
+
+| Topic | Preliminary interpretation | Relevance to the project |
+|---|---|---|
+| 1 | AI in academic research and higher education | Peripheral relevance |
+| 2 | Industrial AI and technology products | Mostly retrieval noise |
+| 3 | Global Peace Index, politics, and security | Retrieval noise caused partly by acronym ambiguity |
+| 4 | AI use in K-12 schools, teaching, and classroom practice | Substantively relevant |
+| 5 | AI/ML applications in autism | Substantively relevant to disability and special education |
+
+Topic 4 was the clearest education-focused topic, centering on students, teachers, schools, and classroom uses of AI. Topic 5 captured AI and machine-learning applications related to autism, including screening, diagnosis, intervention, and educational applications.
+
+In contrast, Topics 2 and 3 revealed systematic retrieval noise. In particular, the acronym **IEP** sometimes referred to terms unrelated to *Individualized Education Program*, such as the *Institute for Economics and Peace*, while similar character strings also appeared in technology product names. Topic 1 represented a more peripheral form of relevance, focusing mainly on AI in academic research while mentioning special education only incidentally.
+
+The preliminary topic model recovered relatively little clearly identifiable special-education discourse. However, this result does not necessarily indicate that such discourse is absent from the retrieved corpus. Because topic modeling identifies dominant patterns in the corpus without reference to a predefined target concept, special-education-related content may be obscured by broader AI, education, or technology discourse.
+
+Before revising the substantive research question or reconstructing the corpus, I will further evaluate whether the weak special-education signal reflects the retrieval strategy, the document-level unit of analysis, or the use of an unsupervised topic model.
+
+# AI Use Statement
+
+ChatGPT was used to assist with R debugging, code explanation and workflow organization. I reviewed and executed the code and manually checked representative documents before interpreting the topic-model results.
