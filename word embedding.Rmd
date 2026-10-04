@@ -1,0 +1,264 @@
+---
+title: "word embedding"
+author: "yue shen"
+date: "2026-10-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_knit$set(
+  root.dir = "/Users/koyohoma/Documents/UTD/2026 Fall/EPPS6355/EPPS6355"
+)
+```
+
+
+# Research Question
+My original research question asks:
+**Do journalistic, institutional, and corporate sources differ in how they frame the benefits and risks of AI in special education, and in the types of evidence used to support these claims?**
+The independent variable is source type (e.g., journalistic, institutional, and corporate sources). Source type refers to the original content producer rather than the publisher or platform through which the content was retrieved.
+The first dependent variable is framing pattern, particularly whether AI is discussed in benefit-oriented or risk-oriented terms. The second dependent variable is evidence type, including research findings, quantitative data, and expert quotations.
+For Assignment 3, I focus specifically on DV1: framing pattern. Word embeddings are used to examine the semantic neighborhoods surrounding benefit- and risk-related concepts. Because the current analysis is conducted on the pooled corpus rather than separately by source type, this assignment serves as a preliminary assessment of whether word embeddings provide a reliable representation of benefit- and risk-related semantic associations.
+
+Therefore, the research question for this assignment is:
+**How are AI-related benefit and risk concepts represented in the corpus, and how do locally trained and pretrained word embeddings differ in the semantic associations they recover?**
+
+These results will inform the later source-type comparison by evaluating whether the embedding approach is sufficiently reliable for examining differences across journalistic, institutional, and corporate sources.
+
+```{r}
+rtf_files <- c(
+  list.files(
+    "raw data/Files1-500",
+    pattern = "\\.rtf$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  ),
+  list.files(
+    "raw data/Files 501-1000",
+    pattern = "\\.rtf$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+)
+
+length(rtf_files)
+
+library(striprtf)
+
+ML <- data.frame(
+  doc_id = rtf_files,
+  text = sapply(
+    rtf_files,
+    function(f) paste(read_rtf(f), collapse = "\n")
+  ),
+  stringsAsFactors = FALSE
+)
+
+nrow(ML)
+
+
+
+```
+
+
+```{r}
+ML <- ML[
+  !grepl("doclist", ML$doc_id, ignore.case = TRUE),
+]
+
+nrow(ML)
+```
+
+# Dataset
+The original downloaded corpus contained *974* documents. During Assignment 2, inspection of the topic-modeling results revealed substantial noise from News Bites and Global Round Up. These files were composite news digests that combined multiple unrelated news items within a single document rather than representing individual coherent articles.
+
+Because the intended unit of analysis is one coherent article, documents from these two sources were excluded. The resulting cleaned corpus contained *670* documents.
+
+
+```{r}
+ML$is_news_bites <- grepl(
+  "News Bites",
+  substr(ML$text, 1, 300),
+  ignore.case = TRUE
+)
+
+ML$is_global_roundup <- grepl(
+  "Global Round Up",
+  substr(ML$text, 1, 300),
+  ignore.case = TRUE
+)
+
+ML_clean <- ML[
+  !(ML$is_news_bites | ML$is_global_roundup),
+]
+
+nrow(ML_clean)
+```
+
+# Local Word Embedding Analysis
+A locally trained Word2Vec model was first fitted to the cleaned corpus using the same basic settings demonstrated in class: skip-gram architecture, 100 dimensions, a context window of 5 words, 20 training iterations, and a minimum word count of 5.
+The cleaned corpus produced a vocabulary of approximately *9,193* words, each represented by a 100-dimensional vector.
+
+Nearest-neighbor analysis was conducted for two substantively relevant terms: risk and benefit. The model was also trained a second time using the same parameters to assess the stability of the resulting semantic neighborhoods.
+
+After removing the composite news-digest documents, the locally trained embedding space became somewhat more interpretable, although stability remained mixed. The semantic neighborhood of risk showed moderate consistency across repeated runs, whereas the neighborhood of benefit changed substantially. Several nearest neighbors also remained substantively off-domain.
+
+These results suggest that the locally trained embeddings should be treated as exploratory rather than as reliable evidence of benefit-risk framing.
+
+```{r}
+
+library(word2vec)
+
+set.seed(123)
+
+model <- word2vec(
+  x = ML_clean$text,
+  type = "skip-gram",
+  dim = 100,
+  window = 5,
+  iter = 20,
+  min_count = 5
+)
+
+embeddings <- as.matrix(model)
+dim(embeddings)
+```
+
+```{r}
+predict(model, newdata = c("risk", "benefit"),
+        type = "nearest", top_n = 8)
+```
+
+#Check the frequency of target words in corpus 
+```{r}
+sum(stringr::str_count(stringr::str_to_lower(ML_clean$text), "\\brisk\\b"))
+sum(stringr::str_count(stringr::str_to_lower(ML_clean$text), "\\bbenefit\\b"))
+
+```
+# Validation: Stability Check
+I first conducted a qualitative inspection of the nearest neighbors to assess their substantive coherence. This inspection revealed that several neighboring words were off-domain or difficult to interpret, particularly for *benefit*. I then conducted a stability check by retraining the local Word2Vec model with the same parameters and comparing the resulting nearest neighbors across runs.
+
+The neighborhood of *risk* showed moderate stability, whereas the neighborhood of benefit was considerably less stable. Together, the qualitative inspection and stability check suggest that the locally trained embeddings should be interpreted cautiously.
+
+```{r}
+set.seed(456)
+
+model2 <- word2vec(
+  x = ML_clean$text,
+  type = "skip-gram",
+  dim = 100,
+  window = 5,
+  iter = 20,
+  min_count = 5
+)
+
+predict(model2, newdata = c("risk", "benefit"),
+        type = "nearest", top_n = 8)
+```
+
+# Pretrained GloVe Embeddings
+Because the corpus is relatively small for training stable local embeddings, I also used pretrained GloVe embeddings as a comparison. The pretrained model contained 400,000 words, each represented by a 100-dimensional vector.
+
+Nearest neighbors were again examined for risk and benefit
+
+The pretrained GloVe embeddings produced substantially more semantically coherent neighborhoods than the locally trained Word2Vec model. For example, risk was associated with terms such as danger, exposure, potential, and consequences.The pretrained representation of benefit was also more coherent than the local representation, with neighboring terms such as benefits, pay, cost, care, and contributions.
+
+# pretrained database 
+```{r}
+glove <- readr::read_table(
+  "glove.6B/glove.6B.100d.txt",
+  col_names = FALSE,
+  show_col_types = FALSE
+)
+
+dim(glove)
+```
+
+# embedding matrix
+```{r}
+glove_words <- glove[[1]]
+
+glove_matrix <- as.matrix(glove[, -1])
+
+rownames(glove_matrix) <- glove_words
+```
+
+# use cosine similarity to find nearest neigbours for pretrained dataset
+
+```{r}
+nearest_glove <- function(word, embeddings, top_n = 8) {
+  
+  target <- embeddings[word, ]
+  
+  sims <- as.vector(
+    embeddings %*% target /
+      (sqrt(rowSums(embeddings^2)) * sqrt(sum(target^2)))
+  )
+  
+  names(sims) <- rownames(embeddings)
+  sims[word] <- NA
+  
+  top <- sort(sims, decreasing = TRUE, na.last = NA)[1:top_n]
+  
+  data.frame(
+    term1 = word,
+    term2 = names(top),
+    similarity = unname(top),
+    rank = 1:top_n
+  )
+}
+
+nearest_glove("risk", glove_matrix, top_n = 8)
+nearest_glove("benefit", glove_matrix, top_n = 8)
+
+```
+
+# put local vs pretrained results together
+
+```{r}
+local_nn <- predict(
+  model,
+  newdata = c("risk", "benefit"),
+  type = "nearest",
+  top_n = 5
+)
+
+local_table <- dplyr::bind_rows(local_nn) |>
+  dplyr::select(
+    target = term1,
+    rank,
+    local_neighbor = term2,
+    local_similarity = similarity
+  )
+
+pretrained_table <- dplyr::bind_rows(
+  lapply(
+    c("risk", "benefit"),
+    function(w) nearest_glove(w, glove_matrix, top_n = 5)
+  )
+) |>
+  dplyr::select(
+    target = term1,
+    rank,
+    pretrained_neighbor = term2,
+    pretrained_similarity = similarity
+  )
+
+comparison_table <- dplyr::left_join(
+  local_table,
+  pretrained_table,
+  by = c("target", "rank")
+)
+
+comparison_table
+```
+
+# Results
+The pretrained GloVe embeddings appeared to produce more semantically coherent nearest neighbors than the locally trained Word2Vec model. However, GloVe was used as a general semantic reference: its nearest neighbors reflect associations learned from its original training corpus, rather than associations specific to the news articles analyzed here. Cosine similarity values were therefore not compared directly across the two embedding spaces. The comparison focused on the interpretability of the neighboring words. This exploratory analysis does not directly measure benefit- or risk-oriented framing at the article level, and further validation against the articles’ actual contexts is needed before using these embeddings to measure framing.
+
+
+
+# AI Use Statement
+
+ChatGPT was used to assist with R debugging, code explanation, and workflow organization. I reviewed and executed the code and evaluated the semantic coherence and stability of the nearest-neighbor results before interpreting the word-embedding analysis.
