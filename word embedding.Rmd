@@ -263,6 +263,6 @@ The pretrained GloVe embeddings appeared to produce more semantically coherent n
 
 ChatGPT was used to assist with R debugging, code explanation, and workflow organization. I reviewed and executed the code and evaluated the semantic coherence and stability of the nearest-neighbor results before interpreting the word-embedding analysis.
 
-#Question for professor
+# Question for professor
 After doing unsupervised learning and word embedding, the results i got are always chaotic and full of noise. I am also trying to do a supervised learning to see if the result would improve. But at this stage, do I need to change my database (but I do not think it is a good step..)? Or there are more methods to use in the later weeks to improve the results? I'm also wondering in the real research process, would the similar situation happens and how researchers deal with it?
 
